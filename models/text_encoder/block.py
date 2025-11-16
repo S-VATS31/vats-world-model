@@ -72,8 +72,8 @@ class TransformerBlock(nn.Module):
         x: Tensor,
         use_qk_norm: bool,
         use_mqa: bool,
-        eps: Optional[float] = None,
-        norm: Optional[int] = None,
+        eps: Optional[float] = 1e-10,
+        norm: Optional[int] = 2,
         padding_mask: Optional[Tensor] = None
     ) -> Tensor:
         """Forward pass of transformer block.
