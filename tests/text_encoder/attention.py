@@ -84,3 +84,15 @@ def test_qkv_shapes(attn, x, padding_mask):
     _, q, k, v = attn(x, True, False, padding_mask=padding_mask, _return_qkv=True)
     correct_shape = (B, ModelArgs().num_heads, T, D/ModelArgs().num_heads)
     assert q.shape == k.shape == v.shape == correct_shape
+
+def test_no_qk_norm(attn, x, padding_mask):
+    pass
+
+def test_qk_norm_stability(attn, x, padding_mask):
+    pass
+
+def test_no_qk_norm_stability(attn, x, padding_mask):
+    pass
+
+def test_mqa(attn, x, padding_mask):
+    pass
