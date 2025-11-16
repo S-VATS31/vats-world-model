@@ -139,8 +139,8 @@ class Attention(nn.Module):
         x: Tensor, 
         use_qk_norm: bool, 
         use_mqa: bool,
-        eps: Optional[float] = None,
-        norm: Optional[int] = None
+        eps: Optional[float] = 1e-10,
+        norm: Optional[int] = 2
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """Setup query, key, and value tensors.
         
@@ -158,6 +158,14 @@ class Attention(nn.Module):
                 Tensor: Value tensor of shape [B, T, num_heads or 1, head_dim].
         """
         B, T, _ = x.shape
+
+        # Handle 0 token input
+        if T == 0:
+            return (
+                torch.empty(B, 0, self.num_heads, self.head_dim),
+                torch.empty(B, 0, self.num_heads, self.head_dim),
+                torch.empty(B, 0, self.num_heads, self.head_dim)
+            )
         if self.use_qkv_proj:
             qkv = self.w_qkv(x)
             # q: [B, T, num_heads * head_dim]
@@ -214,6 +222,12 @@ class Attention(nn.Module):
         """
         B, _, T_q, _= query.shape
         T_k = key.size(2)
+        
+        # Handle 0 token input
+        if query.size(1) == 0 or key.size(1) == 0:
+            return torch.empty(B, 0, self.d_model)
+        
+        # Handle padding tensor
         if padding_mask is not None:
             padding_mask = padding_mask.bool()
             padding_mask = padding_mask[:, None, :, None] # [B, 1, T_q, 1]
@@ -226,15 +240,15 @@ class Attention(nn.Module):
         ) # [B, num_heads, T, head_dim]
         attn_out = attn_out.transpose(1, 2).contiguous().view(B, T_q, -1)
         
-        return attn_out
+        return self.w_o(attn_out)
 
     def forward(
         self,
         x: torch.Tensor,
         use_qk_norm: bool,
         use_mqa: bool,
-        eps: Optional[float] = None,
-        norm: Optional[int] = None,
+        eps: Optional[float] = 1e-10,
+        norm: Optional[int] = 2,
         padding_mask: Optional[Tensor] = None,
         *,
         _return_qkv: bool = False
@@ -311,8 +325,8 @@ class AttentionBlock(nn.Module):
         x: Tensor,
         use_qk_norm: bool,
         use_mqa: bool,
-        eps: Optional[float] = None,
-        norm: Optional[int] = None,
+        eps: Optional[float] = 1e-10,
+        norm: Optional[int] = 2,
         padding_mask: Optional[Tensor] = None
     ) -> Tensor:
         """Forward pass of the attention block.

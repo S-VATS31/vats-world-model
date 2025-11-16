@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.amp import autocast
 
+# TODO: add optimized swiglu if GPUs available
+
 class MLP(nn.Module):
     """MLP network for transformer.
     

@@ -1,6 +1,5 @@
 from typing import *
 
-import torch
 from torch import Tensor, LongTensor
 import torch.nn as nn
 from torch.amp import autocast
@@ -8,6 +7,8 @@ from torch.utils.checkpoint import checkpoint
 
 from models.text_encoder.block import TransformerBlock
 from configs.text_encoder.model_args.xsmall import ModelArgs
+
+# TODO: Look into more efficient gradient checkpointing
 
 class TransformerEncoder(nn.Module):
     """Complete encoder model.
@@ -122,19 +123,3 @@ class TransformerEncoder(nn.Module):
             x = self.rms_norm(x)
 
             return x
-
-def test_transformer():
-    model_args = ModelArgs()
-    model = TransformerEncoder(model_args).to("cpu")
-    B, T = 16, 8
-    input_ids = torch.randint(
-        0, model_args.vocab_size, (B, T), device="cpu", dtype=torch.int64
-    )
-    padding_mask = torch.randint(
-        0, 2, (B, T), device="cpu", dtype=torch.bool
-    )
-    return model(input_ids, padding_mask)
-
-if __name__ == "__main__":
-    out = test_transformer()
-    print(out.shape)

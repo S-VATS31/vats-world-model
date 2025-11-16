@@ -22,13 +22,13 @@ def extend_kv_heads(
         return tensor
     return tensor.repeat_interleave(repeats, dim=dim)
     
-def apply_qk_norm(tensor: Tensor, eps: float = 1e-10, norm: int = 2) -> Tensor:
+def apply_qk_norm(tensor: Tensor, eps: float, norm: int) -> Tensor:
     """Apply QK normalization to input tensors.
     
     Args:
         tensor (Tensor): Input query or key tensor.
-        eps (float): Small value to maintain numerical stability. Defaults to 1e-10.
-        norm (int): L_norm normalization. Defaults to L_2 norm.
+        eps (float): Small value to maintain numerical stability.
+        norm (int): L_norm normalization.
 
     Returns:
         Tensor: Normalized query or key tensor.
