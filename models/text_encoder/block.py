@@ -1,8 +1,8 @@
-from typing import *
+from typing import Optional
 
 import torch
-from torch import Tensor
 import torch.nn as nn
+from torch import Tensor
 from torch.amp import autocast
 
 from models.text_encoder.attention import AttentionBlock

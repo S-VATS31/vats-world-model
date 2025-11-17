@@ -1,14 +1,12 @@
-from typing import *
+from typing import Optional
 
-from torch import Tensor, LongTensor
 import torch.nn as nn
+from torch import Tensor, LongTensor
 from torch.amp import autocast
 from torch.utils.checkpoint import checkpoint
 
 from models.text_encoder.block import TransformerBlock
 from configs.text_encoder.model_args.xsmall import ModelArgs
-
-# TODO: Look into more efficient gradient checkpointing
 
 class TransformerEncoder(nn.Module):
     """Complete encoder model.

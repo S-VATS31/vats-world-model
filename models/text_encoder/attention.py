@@ -1,14 +1,12 @@
-from typing import *
+from typing import Optional, Tuple, Union
 
 import torch
-from torch import Tensor
 import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 from torch.amp import autocast
 
 from utils.attention import extend_kv_heads, apply_qk_norm
-
-# TODO: add optimized version of attention (def _optimized_attention()) if GPUs available
 
 class RoPE(nn.Module):
     """RoPE module for text encoder.
@@ -65,6 +63,7 @@ class RoPE(nn.Module):
         rotated = torch.stack((-x_odd, x_even), dim=-1).reshape_as(x)
 
         return x * cos_embed + rotated * sin_embed # [B, T, num_heads, head_dim]
+
 
 class Attention(nn.Module):
     """Attention module for encoder.
@@ -268,6 +267,7 @@ class Attention(nn.Module):
             if _return_qkv:
                 return (self._scaled_dot_product_attention(q, k, v, padding_mask), q, k, v)
             return self._scaled_dot_product_attention(q, k, v, padding_mask)
+
 
 class AttentionBlock(nn.Module):
     """Attention block for attention, normalization, residuals, and dropout.
