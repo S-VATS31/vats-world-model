@@ -105,9 +105,7 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.d_model = d_model
         self.query_groups = query_groups
-        self.rope_theta = rope_theta
         self.softmax_scale = softmax_scale
-        self.use_proj_bias = use_proj_bias
         self.use_qkv_proj = use_qkv_proj
         self.device = device
         self.dtype = dtype
