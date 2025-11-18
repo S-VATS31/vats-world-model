@@ -201,8 +201,6 @@ class SpatioTemporalAttention(nn.Module):
         use_cache: bool = False,
         kv_cache: Optional[TemporalKVCache] = None,
         layer_idx: Optional[int] = None,
-        past_keys: Optional[Tensor] = None,
-        past_values: Optional[Tensor] = None
     ) -> Tuple[Tensor, Tensor, Tensor]:
         """Setup temporal QKV tensors.
         
@@ -212,16 +210,15 @@ class SpatioTemporalAttention(nn.Module):
             use_mqa (bool): Whether to use MQA or not.
             qk_norm_eps (float): QK norm epsilon value.
             qk_norm_type (int): L_(qk_norm_type) normalization.
+            use_cache (bool): Whether to use KV cache.
             kv_cache (Optional[TemporalKVCache]): KV caching module.
             layer_idx (Optional[int]): Layer to update KV's with respect to.
-            past_keys (Optional[Tensor]): Past key tensors to update cache.
-            past_values (Optional[Tensor]): Past value tensors to update cache.
 
         Returns:
             Tuple:
                 Tensor: Query tensor of shape [B*H*W, num_heads, T_frames, head_dim].
-                Tensor: Key tensor of shape [B*H*W, num_heads or 1, T_frames, head_dim].
-                Tensor: Value tensor of shape [B*H*W, num_heads or 1, T_frames, head_dim].
+                Tensor: Key tensor of shape [B*H*W, num_heads or 1, T_frames_total, head_dim].
+                Tensor: Value tensor of shape [B*H*W, num_heads or 1, T_frames_total, head_dim].
         """
         B, T_frames, num_spatial_patches, _ = x.shape
 
@@ -241,7 +238,7 @@ class SpatioTemporalAttention(nn.Module):
                     device=x.device, dtype=x.dtype
                 )
             )
-        
+
         # x: [B*H*W, T_frames, d_model]
         x = x.view(-1, T_frames, self.d_model)
 
@@ -277,9 +274,26 @@ class SpatioTemporalAttention(nn.Module):
         k = extend_kv_heads(k, dim=2, repeats=self.heads_per_group, use_mqa=use_mqa)
         v = extend_kv_heads(v, dim=2, repeats=self.heads_per_group, use_mqa=use_mqa)
 
-        # Update temporal cache
-        # TODO: apply update of cache here
-
+        # Handle KV caching
+        if use_cache and kv_cache is not None and layer_idx is not None:
+            # Permute to match cache format: [B*H*W, num_heads, T_frames, head_dim]
+            k_new = k.permute(0, 2, 1, 3)  # [B*H*W, num_heads, T_frames, head_dim]
+            v_new = v.permute(0, 2, 1, 3)  # [B*H*W, num_heads, T_frames, head_dim]
+            
+            # Get ALL previously cached frames (not just T_frames)
+            past_k, past_v = kv_cache.get_cached_kv(layer_idx)
+            
+            # Update cache with ONLY the new k/v
+            kv_cache.update(layer_idx, k_new, v_new)
+            
+            # Concatenate past with current for attention computation
+            if past_k is not None and past_v is not None:
+                k_new = torch.cat([past_k, k_new], dim=2)  # [B*H*W, num_heads, T_total, head_dim]
+                v_new = torch.cat([past_v, v_new], dim=2)  # [B*H*W, num_heads, T_total, head_dim]
+            
+            # Use the concatenated k,v for attention (already permuted)
+            return q.permute(0, 2, 1, 3), k_new, v_new
+        
         # q: [B*H*W, num_heads, T_frames, head_dim]
         # k, v: [B*H*W, num_heads or 1, T_frames, head_dim]
         q = q.permute(0, 2, 1, 3)
@@ -418,8 +432,6 @@ class SpatioTemporalAttention(nn.Module):
         use_cache: bool = False,
         kv_cache: Optional[TemporalKVCache] = None,
         layer_idx: Optional[int] = None,
-        past_keys: Optional[Tensor] = None,
-        past_values: Optional[Tensor] = None,
         padding_mask: Optional[Tensor] = None,
         attention_interleave: Literal["st", "ts"] = "st",
         *,
@@ -437,8 +449,6 @@ class SpatioTemporalAttention(nn.Module):
             use_cache (bool): Whether to use cache or not.
             kv_cache (Optional[TemporalKVCache]): KV caching module.
             layer_idx (Optional[int]): Layer index to update KVs.
-            past_keys (Optional[Tensor]): Past key tensors to update cache.
-            past_values (Optional[Tensor]): Past value tensors to update cache.
             padding_mask (Optional[Tensor]): Padding tensor of shape [B, T_frames.]
             attention_interleave (Literal["st", "ts"]): Interleaving method.
                 st: Sequential application as TA(SA(x)).
@@ -462,9 +472,7 @@ class SpatioTemporalAttention(nn.Module):
                 qk_norm_type=qk_norm_type,
                 use_cache=use_cache,
                 kv_cache=kv_cache,
-                layer_idx=layer_idx,
-                past_keys=past_keys,
-                past_values=past_values
+                layer_idx=layer_idx
             )
             # Get spatial QKV
             query_spatial, key_spatial, value_spatial = self._setup_spatial_qkv(
@@ -597,8 +605,6 @@ class SpatioTemporalAttentionBlock(nn.Module):
         use_cache: bool = False,
         kv_cache: Optional[TemporalKVCache] = None,
         layer_idx: Optional[int] = None,
-        past_keys: Optional[Tensor] = None,
-        past_values: Optional[Tensor] = None,
         padding_mask: Optional[Tensor] = None,
         attention_interleave: Literal["st", "ts"] = "st"
     ) -> Tensor:
@@ -614,8 +620,6 @@ class SpatioTemporalAttentionBlock(nn.Module):
             use_cache (bool): Whether to use cache or not.
             kv_cache (Optional[TemporalKVCache]): KV caching module.
             layer_idx (Optional[int]): Layer index to update KVs.
-            past_keys (Optional[Tensor]): Past key tensors to update cache.
-            past_values (Optional[Tensor]): Past value tensors to update cache.
             padding_mask (Optional[Tensor]): Padding tensor of shape [B, T_frames.]
             attention_interleave (Literal["st", "ts"]): Interleaving method.
                 st: Sequential application as TA(SA(x)).
@@ -636,8 +640,6 @@ class SpatioTemporalAttentionBlock(nn.Module):
                     use_cache=use_cache,
                     kv_cache=kv_cache,
                     layer_idx=layer_idx,
-                    past_keys=past_keys,
-                    past_values=past_values,
                     padding_mask=padding_mask,
                     attention_interleave=attention_interleave
                 )
@@ -693,6 +695,3 @@ def test_attention_block(use_pad:bool=True):
     for name, param in attn.named_parameters():
         print(f"{name}: {param.grad}")
     return out
-
-if __name__ == "__main__":
-    test_attention_block(True)
