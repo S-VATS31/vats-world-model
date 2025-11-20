@@ -620,7 +620,7 @@ class SpatioTemporalAttentionBlock(nn.Module):
             use_cache (bool): Whether to use cache or not.
             kv_cache (Optional[TemporalKVCache]): KV caching module.
             layer_idx (Optional[int]): Layer index to update KVs.
-            padding_mask (Optional[Tensor]): Padding tensor of shape [B, T_frames.]
+            padding_mask (Optional[Tensor]): Padding tensor of shape [B, T_frames].
             attention_interleave (Literal["st", "ts"]): Interleaving method.
                 st: Sequential application as TA(SA(x)).
                 ts: Sequential application as SA(TA(x)).
