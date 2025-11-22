@@ -276,22 +276,22 @@ class SpatioTemporalAttention(nn.Module):
 
         # Handle KV caching
         if use_cache and kv_cache is not None and layer_idx is not None:
-            # Permute to match cache format: [B*H*W, num_heads, T_frames, head_dim]
-            k_new = k.permute(0, 2, 1, 3)  # [B*H*W, num_heads, T_frames, head_dim]
-            v_new = v.permute(0, 2, 1, 3)  # [B*H*W, num_heads, T_frames, head_dim]
+            # k_new, v_new: [B*H*W, num_heads, T_frames, head_dim]
+            k_new = k.permute(0, 2, 1, 3)
+            v_new = v.permute(0, 2, 1, 3)
             
-            # Get ALL previously cached frames (not just T_frames)
+            # Get all previously cached frames
             past_k, past_v = kv_cache.get_cached_kv(layer_idx)
             
-            # Update cache with ONLY the new k/v
+            # Update cache with only the new KV
             kv_cache.update(layer_idx, k_new, v_new)
             
             # Concatenate past with current for attention computation
             if past_k is not None and past_v is not None:
-                k_new = torch.cat([past_k, k_new], dim=2)  # [B*H*W, num_heads, T_total, head_dim]
-                v_new = torch.cat([past_v, v_new], dim=2)  # [B*H*W, num_heads, T_total, head_dim]
+                k_new = torch.cat([past_k, k_new], dim=2)
+                v_new = torch.cat([past_v, v_new], dim=2)
             
-            # Use the concatenated k,v for attention (already permuted)
+            # Use the concatenated KV for attention
             return q.permute(0, 2, 1, 3), k_new, v_new
         
         # q: [B*H*W, num_heads, T_frames, head_dim]
