@@ -74,6 +74,8 @@ class SpatialTransformerBlock(nn.Module):
     def forward(
         self, 
         x: Tensor,
+        H_patch: int,
+        W_patch: int,
         use_qk_norm: bool = True,
         use_mqa: bool = False,
         qk_norm_eps: float = 1e-10,
@@ -88,6 +90,8 @@ class SpatialTransformerBlock(nn.Module):
         
         Args:
             x (Tensor): Input tensor of shape [B, H*W, d_model].
+            H_patch (int): Height of each patch.
+            W_patch (int): Width of each patch.
             use_qk_norm (bool): Whether to use QK normalization or not.
             use_mqa (bool): Whether to use MQA or not.
             qk_norm_eps (float): Epsilon value for QK normalization.
@@ -102,6 +106,8 @@ class SpatialTransformerBlock(nn.Module):
             return self.mlp_block(
                 self.attn_block(
                     x,
+                    H_patch=H_patch,
+                    W_patch=W_patch,
                     use_qk_norm=use_qk_norm,
                     use_mqa=use_mqa,
                     qk_norm_eps=qk_norm_eps,
@@ -113,3 +119,33 @@ class SpatialTransformerBlock(nn.Module):
                     padding_mask=padding_mask
                 )
             )
+
+def test_block(use_pad:bool=True):
+    block = SpatialAttentionBlock(
+        d_model=128,
+        num_heads=32,
+        query_groups=8,
+        rope_theta=10000.0,
+        softmax_scale=0.5,
+        use_qkv_bias=False,
+        use_o_bias=False,
+        use_qkv_proj=True,
+        rms_norm_eps=1e-10,
+        dropout_prob=0.2,
+        device="cpu",
+        dtype=torch.float32
+    )
+    B, H, W = 20, 36, 72
+    x = torch.randn(B, H*W, 128, device="cpu", dtype=torch.float32)
+    if use_pad:
+        padding_mask = torch.randint(
+            0, 2, (B, H*W), device="cpu", dtype=torch.float32
+        )
+    else:
+        padding_mask = None
+    out = block(x, H_patch=H, W_patch=W, padding_mask=padding_mask)
+    return out
+
+if __name__ == "__main__":
+    out = test_block(True)
+    print(out.shape)
