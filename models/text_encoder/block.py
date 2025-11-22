@@ -6,7 +6,7 @@ from torch import Tensor
 from torch.amp import autocast
 
 from models.text_encoder.attention import AttentionBlock
-from utils.mlp import MLPBlock
+from models.mlp import MLPBlock
 
 class TransformerBlock(nn.Module):
     """Block applying transformations of attention and MLP block.
