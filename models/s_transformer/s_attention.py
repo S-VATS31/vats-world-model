@@ -291,7 +291,17 @@ class SpatialAttention(nn.Module):
         if padding_mask is not None:
             padding_mask = padding_mask.bool() # [B, T_q]
             query_padding_mask = padding_mask[:, None, :, None] # [B, 1, T_q, 1]
-            key_padding_mask = padding_mask[:, None, None, :] # [B, 1, 1, T_k]
+            # Handle case where T_k>T_q (cache being used)
+            if T_k > T_q:
+                past_padding_mask = torch.ones(
+                    B, T_k - T_q, 
+                    device=self.device, 
+                    dtype=torch.bool
+                )
+                full_key_mask = torch.cat([past_padding_mask, padding_mask], dim=1) # [B, T_k]
+                key_padding_mask = full_key_mask[:, None, None, :] # [B, 1, 1, T_k]
+            else:
+                key_padding_mask = padding_mask[:, None, None, :] # [B, 1, 1, T_k]
             attn_mask = torch.logical_and(query_padding_mask, key_padding_mask)
             if is_causal:
                 # causal_mask: [H*W, H*W], True: pad, False: compute attention

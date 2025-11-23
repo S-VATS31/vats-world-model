@@ -176,5 +176,5 @@ def test_model(use_cache:bool=False, log_grads:bool=True):
     return logits
 
 if __name__ == "__main__":
-    logits = test_model(False, True)
+    logits = test_model(True, False)
     print(logits.shape)
