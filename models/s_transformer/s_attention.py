@@ -302,7 +302,7 @@ class SpatialAttention(nn.Module):
                 key_padding_mask = full_key_mask[:, None, None, :] # [B, 1, 1, T_k]
             else:
                 key_padding_mask = padding_mask[:, None, None, :] # [B, 1, 1, T_k]
-            attn_mask = torch.logical_and(query_padding_mask, key_padding_mask)
+            attn_mask = torch.logical_or(query_padding_mask, key_padding_mask)
             if is_causal:
                 # causal_mask: [H*W, H*W], True: pad, False: compute attention
                 causal_mask = torch.triu(
@@ -310,7 +310,7 @@ class SpatialAttention(nn.Module):
                     diagonal=1
                 )
                 causal_mask = causal_mask[None, None, :, :] # [1, 1, T_q, T_k]
-                attn_mask = torch.logical_and(attn_mask, causal_mask)
+                attn_mask = torch.logical_or(attn_mask, causal_mask)
         else:
             if is_causal:
                 # Causal mask is only constraint
