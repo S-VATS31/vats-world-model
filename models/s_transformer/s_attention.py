@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.amp import autocast
 
-from utils.attention import apply_qk_norm, extend_kv_heads
+from utils.attention_utils import apply_qk_norm, extend_kv_heads
 from models.s_transformer.spatial_kv_cache import SpatialKVCache
 
 import torch

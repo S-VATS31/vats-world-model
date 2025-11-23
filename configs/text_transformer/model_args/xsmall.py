@@ -26,6 +26,6 @@ class ModelArgs:
     softmax_scale: float = math.sqrt(256//16)
     use_mlp_bias: bool = False
     device: torch.device = torch.device("cpu")
-    dtype: torch.dtype = torch.float16
+    dtype: torch.dtype = torch.float32
     use_qk_norm: bool = True
     qk_norm_type: int = 2

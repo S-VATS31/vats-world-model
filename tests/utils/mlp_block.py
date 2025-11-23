@@ -2,7 +2,7 @@ import pytest
 import torch
 
 from configs.text_encoder.model_args.xsmall import ModelArgs
-from models.text_encoder.mlp import MLPBlock
+from models.mlp import MLPBlock
 
 B, T, D = 16, 8, ModelArgs().d_model
 
