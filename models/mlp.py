@@ -28,9 +28,27 @@ class MLP(nn.Module):
     ):
         super().__init__()
 
-        self.weight1 = nn.Linear(d_model, d_ffn, use_mlp_bias, device, dtype)
-        self.weight2 = nn.Linear(d_model, d_ffn, use_mlp_bias, device, dtype)
-        self.weight3 = nn.Linear(d_ffn, d_model, use_mlp_bias, device, dtype)
+        self.weight1 = nn.Linear(
+            d_model, 
+            d_ffn, 
+            bias=use_mlp_bias, 
+            device=device,
+            dtype=dtype
+        )
+        self.weight2 = nn.Linear(
+            d_model,
+            d_ffn, 
+            bias=use_mlp_bias, 
+            device=device, 
+            dtype=dtype
+        )
+        self.weight3 = nn.Linear(
+            d_ffn, 
+            d_model, 
+            bias=use_mlp_bias, 
+            device=device, 
+            dtype=dtype
+        )
         self.dropout = nn.Dropout(p=dropout_prob)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -42,7 +60,7 @@ class MLP(nn.Module):
         Returns:
             Tensor: Output tensor of same shape.
         """
-        with autocast(device_type=x.device.type, dtype=x.dtype):
+        with autocast(device_type=x.device.type):
             return self.dropout(self.weight3(F.silu(self.weight1(x)) * self.weight2(x)))
 
 class MLPBlock(nn.Module):
@@ -95,5 +113,5 @@ class MLPBlock(nn.Module):
         Returns:
             Tensor: Output tensor of same shape.
         """
-        with autocast(device_type=x.device.type, dtype=x.dtype):
+        with autocast(device_type=x.device.type):
             return x + self.dropout(self.mlp(self.rms_norm(x)))

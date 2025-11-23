@@ -40,33 +40,43 @@ class PatchEmbed(nn.Module):
             dtype=dtype
         )
 
-    def forward(self, x: Tensor) -> Tuple[Tensor, Tuple[int, int]]:
+    def forward(self, x: Tensor) -> Tuple[Tensor, Tuple[int, int], Tensor]:
         """Forward pass of patch embeddings layer.
 
         Args:
             x (Tensor): Input image tensor of shape [B, C, H, W].
 
         Returns:
-            Tuple[Tensor, Tuple[int, int]]:
+            Tuple[Tensor, Tuple[int, int], Tensor]:
                 - Tensor: Output tensor of shape [B, Hp*Wp, d_model].
-                - Tuple[int, int]: Height and width patch.
+                - Tuple[int, int]: Height and width in patches (Hp, Wp).
+                - Tensor: Patch-level padding mask [B, Hp*Wp], 1 for real, 0 for padded.
         """
         with autocast(device_type=x.device.type):
-            _, _, H, W = x.shape
+            B, _, H, W = x.shape
             ph, pw = self.patch_size
 
             # Compute necessary padding
             pad_h = (ph - H % ph) % ph
             pad_w = (pw - W % pw) % pw
 
+            # Create pixel-level mask: 1 = real, 0 = padded
+            mask = torch.ones((B, H, W), device=x.device, dtype=torch.bool)
             if pad_h > 0 or pad_w > 0:
                 x = nn.functional.pad(x, (0, pad_w, 0, pad_h))
+                mask = nn.functional.pad(mask, (0, pad_w, 0, pad_h), value=False)
 
-            x = self.proj(x) # [B, d_model, Hp, Wp]
+            # Pass through projection
+            x = self.proj(x)
             Hp, Wp = x.size(-2), x.size(-1)
-            x = x.view(x.size(0), self.d_model, -1).transpose(1, 2).contiguous()
+            x = x.view(B, self.d_model, -1).transpose(1, 2).contiguous()
 
-            return x, (Hp, Wp)
+            # Create patch-level mask
+            mask = mask.unfold(1, ph, ph).unfold(2, pw, pw) # [B, Hp, Wp, ph, pw]
+            mask = mask.any(dim=-1).any(dim=-1) # [B, Hp, Wp]
+            mask = mask.view(B, -1) # [B, Hp*Wp]
+
+            return x, (Hp, Wp), mask
         
 def test_patch_embed():
     patch_embed = PatchEmbed(
@@ -79,10 +89,13 @@ def test_patch_embed():
     )
     B, H, W = 16, 64, 64
     x = torch.randn(B, 3, H, W, device="cpu", dtype=torch.float32)
-    out = patch_embed(x)
+    out, (Hp, Wp), mask = patch_embed(x)
 
-    return out
+    print("Output shape:", out.shape)
+    print("Patch shape (Hp, Wp):", (Hp, Wp))
+    print("Mask shape:", mask.shape)
+    print("Mask sample:", mask)
+    return out, (Hp, Wp), mask
 
 if __name__ == "__main__":
-    out = test_patch_embed()
-    print(out.shape)
+    out, shape, mask = test_patch_embed()
