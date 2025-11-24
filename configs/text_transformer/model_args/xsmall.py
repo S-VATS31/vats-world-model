@@ -20,7 +20,8 @@ class ModelArgs:
     max_seq_len: int = 128
     max_batch_size: int = 2048
     gradient_checkpointing: bool = True
-    use_proj_bias: bool = False
+    use_qkv_bias: bool = False
+    use_o_bias: bool = False
     use_qkv_proj: bool = True
     use_mqa: bool = False
     softmax_scale: float = math.sqrt(256//16)
@@ -29,3 +30,5 @@ class ModelArgs:
     dtype: torch.dtype = torch.float32
     use_qk_norm: bool = True
     qk_norm_type: int = 2
+    use_weight_tying: bool = True
+    is_causal: bool = True
