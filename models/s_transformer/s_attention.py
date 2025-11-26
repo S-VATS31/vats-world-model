@@ -31,6 +31,7 @@ class RoPE2D(nn.Module):
         dtype: torch.dtype
     ):
         super().__init__()
+        
         self.head_dim = head_dim
 
         # inv_freq: [head_dim//2]

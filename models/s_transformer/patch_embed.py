@@ -50,7 +50,7 @@ class PatchEmbed(nn.Module):
             Tuple[Tensor, Tuple[int, int], Tensor]:
                 - Tensor: Output tensor of shape [B, Hp*Wp, d_model].
                 - Tuple[int, int]: Height and width in patches (Hp, Wp).
-                - Tensor: Patch-level padding mask [B, Hp*Wp], 1 for real, 0 for padded.
+                - Tensor: Patch-level mask [B, Hp*Wp]: 0 = compute attention, 1 = pad.
         """
         with autocast(device_type=x.device.type):
             B, _, H, W = x.shape
@@ -60,11 +60,11 @@ class PatchEmbed(nn.Module):
             pad_h = (ph - H % ph) % ph
             pad_w = (pw - W % pw) % pw
 
-            # Create pixel-level mask: 1 = real, 0 = padded
-            mask = torch.ones((B, H, W), device=x.device, dtype=torch.bool)
+            # SDPA-compatible mask: 0 = compute attention, 1 = padded
+            mask = torch.zeros((B, H, W), device=x.device, dtype=torch.bool)
             if pad_h > 0 or pad_w > 0:
                 x = nn.functional.pad(x, (0, pad_w, 0, pad_h))
-                mask = nn.functional.pad(mask, (0, pad_w, 0, pad_h), value=False)
+                mask = nn.functional.pad(mask, (0, pad_w, 0, pad_h), value=True)
 
             # Pass through projection
             x = self.proj(x)

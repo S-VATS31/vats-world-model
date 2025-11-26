@@ -3,15 +3,17 @@ from typing import Tuple, Optional
 import torch
 from torch import Tensor
 
+# TODO: add logging if frames get truncated
+
 class TemporalKVCache:
     """KV cache for temporal attention.
     
     Args:
-        batch_size (int): Number of examples being processed in parallel.
-        max_T_frames (int): Maximum number of input frames allowed.
-        num_spatial_patches (int): Height pixels by width pixels calculated as HW.
+        max_batch_size (int): Number of examples being processed in parallel.
+        max_frames (int): Maximum number of input frames allowed.
         num_heads (int): Number of attention heads.
         head_dim (int): Dimensionality of each attention head.
+        num_layers (int): Number of transformer blocks to be stacked.
         device (torch.device): Accelerator at use.
         dtype (torch.dtype): Data type of tensors.
     """
@@ -19,7 +21,6 @@ class TemporalKVCache:
         self,
         max_batch_size: int,
         max_frames: int,
-        num_spatial_patches: int,
         num_heads: int,
         head_dim: int,
         num_layers: int,
@@ -28,7 +29,6 @@ class TemporalKVCache:
     ):
         self.max_batch_size = max_batch_size
         self.max_frames = max_frames
-        self.num_spatial_patches = num_spatial_patches
         self.num_heads = num_heads
         self.head_dim = head_dim
         self.num_layers = num_layers
@@ -40,11 +40,12 @@ class TemporalKVCache:
         self.batch_size = None
         self.current_frames = None
 
-    def initialize(self, batch_size: int) -> None:
+    def initialize(self, batch_size: int, num_spatial_patches: int) -> None:
         """Initialize cache.
         
         Args:
             batch_size (int): Number of examples being processed in parallel.
+            num_spatial_patches (int): Number of spatial patches to initialize for.
         """
         if batch_size > self.max_batch_size:
             raise ValueError(
@@ -56,13 +57,13 @@ class TemporalKVCache:
         self.cache = [
             {
                 "k": torch.zeros((
-                        batch_size*self.num_spatial_patches, 
+                        batch_size*num_spatial_patches, 
                         self.num_heads,
                         self.max_frames, 
                         self.head_dim
                     ), device=self.device, dtype=self.dtype),
                 "v": torch.zeros((
-                        batch_size*self.num_spatial_patches, 
+                        batch_size*num_spatial_patches, 
                         self.num_heads,
                         self.max_frames, 
                         self.head_dim
@@ -71,19 +72,28 @@ class TemporalKVCache:
             for _ in range(self.num_layers)
         ]
 
-    def update(self, layer_idx: int, k: Tensor, v: Tensor) -> None:
+    def update(
+        self, 
+        layer_idx: int, 
+        k: Tensor, 
+        v: Tensor,
+        num_spatial_patches: int
+    ) -> None:
         """Update KV cache with new KV tensors only.
         
         Args:
             layer_idx (int): Current layer to update KVs with respect to.
             k (Tensor): New key tensor to add to cache.
             v (Tensor): New value tensor to add to cache.
+            num_spatial_patches (int): Number of spatial patches to get batch size.
         """
+        if layer_idx < 0 or layer_idx >= self.num_layers:
+            raise ValueError(f"expected 0 < layer_idx < num_layers, got {layer_idx}")
         batch_spatial = k.size(0)
-        expected_batch_size = batch_spatial // self.num_spatial_patches
+        expected_batch_size = batch_spatial // num_spatial_patches
         
         if self.cache is None or self.batch_size != expected_batch_size:
-            self.initialize(expected_batch_size)
+            self.initialize(expected_batch_size, num_spatial_patches)
 
         # Get new sequence length
         new_frames = k.size(2)
@@ -106,7 +116,11 @@ class TemporalKVCache:
         # Increment frames
         self.current_frames += new_frames
 
-    def get_cached_kv(self, layer_idx: int, frames: Optional[int] = None) -> Tuple[Tensor, Tensor]:
+    def get_cached_kv(
+        self, 
+        layer_idx: int, 
+        frames: Optional[int] = None
+    ) -> Tuple[Tensor, Tensor]:
         """Get cached KV tensors.
         
         Args:
@@ -114,10 +128,13 @@ class TemporalKVCache:
             frames (int, optional): Number of frames to retrieve up to. 
 
         Returns:
-            Tuple[Tensor, Tensor]:
+            Tuple:
                 Tensor: Key tensor.
                 Tensor: Value tensor.
         """
+        if layer_idx < 0 or layer_idx >= self.num_layers:
+            raise ValueError(f"expected 0 < layer_idx < num_layers, got {layer_idx}")
+        
         if self.cache is None:
             return None, None
         

@@ -10,13 +10,149 @@ from utils.attention_utils import apply_qk_norm, extend_kv_heads
 from models.st_transformer.temporal_cache import TemporalKVCache
 
 class RoPE3D(nn.Module):
-    def __init__(self):
+    def __init__(
+        self,
+        head_dim: int,
+        rope_theta: float,
+        device: torch.device,
+        dtype: torch.dtype
+    ):
         super().__init__()
-        pass
 
-    def forward(self, x: Tensor) -> Tensor:
+        if head_dim % 3 != 0:
+            raise ValueError(
+                f"head_dim must be divisible by 3, got {head_dim} % 3 != 0"
+            )
+        
+        self.head_dim = head_dim
+        self.axis_dim = head_dim // 3 # Dimension per axis (T, H, W)
+        inv_freq_thw = []
+        for _ in range(3): # T, H, W
+            inv_freq = 1.0 / (
+                rope_theta ** (
+                    torch.arange(0, self.axis_dim, 2, device=device, dtype=dtype) / self.axis_dim
+                )
+            )
+            inv_freq_thw.append(inv_freq)
+        # use False to prevent state_dict errors
+        self.register_buffer("inv_freq_t", inv_freq_thw[0], persistent=False)
+        self.register_buffer("inv_freq_h", inv_freq_thw[1], persistent=False)
+        self.register_buffer("inv_freq_w", inv_freq_thw[2], persistent=False)
+
+    def _apply_rope_spatial(
+        self, 
+        x: Tensor,
+        H_patch: int, 
+        W_patch: int
+    ) -> Tensor:
+        """Apply RoPE to spatial query and key tensors.
+        
+        Args:
+            x (Tensor): Input spatial query or key tensor.
+            H_patch (int): Height of each patch.
+            W_patch (int): Width of each patch.
+
+        Returns:
+            Tensor: Rotated spatial query or key tensor.
+        """
+        batch_frames, num_spatial_patches, num_heads, d_model = x.shape
+        x_spatial = x.view(batch_frames, H_patch, W_patch, num_heads, d_model)
+        x_spatial = x_spatial.permute(0, 3, 1, 2, 4)  # [B*T, num_heads, H, W, d_model]
+
+        pos_h = torch.arange(H_patch, device=x.device, dtype=x.dtype)
+        pos_w = torch.arange(W_patch, device=x.device, dtype=x.dtype)
+
+        freqs_h = torch.einsum("i,j->ij", pos_h, self.inv_freq_h)
+        freqs_w = torch.einsum("i,j->ij", pos_w, self.inv_freq_w)
+
+        freqs_h = freqs_h[:, None, :].expand(-1, W_patch, -1)
+        freqs_w = freqs_w[None, :, :].expand(H_patch, -1, -1)
+        freqs = freqs_h + freqs_w # sum over freqs
+
+        cos = freqs.cos()[None, None, :, :, :]
+        sin = freqs.sin()[None, None, :, :, :]
+
+        x_axis = x_spatial[..., :self.axis_dim]
+        x1 = x_axis[..., ::2]  # even pos (2i)
+        x2 = x_axis[..., 1::2] # odd pos (2i+1)
+
+        # rotation matrix
+        rot = torch.cat([x1 * cos - x2 * sin,
+                         x1 * sin + x2 * cos], dim=-1)
+
+        x_out = torch.cat([rot, x_spatial[..., self.axis_dim:]], dim=-1)
+        x_out = x_out.permute(0, 2, 3, 1, 4).contiguous().view(
+            batch_frames, num_spatial_patches, num_heads, d_model
+        )
+        return x_out
+
+    def _apply_rope_temporal(self, x: Tensor, T_patch: int) -> Tensor:
+        """Apply RoPE to temporal query and key tensors.
+        
+        Args:
+            x (Tensor): Input temporal query or key tensor.
+            T_patch (int): Temporal length over each patch.
+        
+        Returns:
+            Tensor: Rotated query or key tensor.
+        """
+        # x shape: [B*H*W, T_frames, num_heads, head_dim]
+        pos_t = torch.arange(x.size(1), device=x.device, dtype=x.dtype)
+
+        freqs_t = torch.einsum("i,j->ij", pos_t, self.inv_freq_t) # [T_patch, axis_dim//2]
+
+        # Reshape cos/sin to match x dimensions: [1, T_patch, 1, axis_dim//2]
+        cos = freqs_t.cos()[None, :, None, :]
+        sin = freqs_t.sin()[None, :, None, :]
+
+        x_t = x[..., :self.axis_dim]
+        # x_t: [B*H*W, T_frames, num_heads, axis_dim]
+        x1 = x_t[..., 0::2]
+        x2 = x_t[..., 1::2]
+
+        # rotation matrix
+        rot = torch.cat([x1 * cos - x2 * sin,
+                        x1 * sin + x2 * cos], dim=-1)
+
+        # concatenate rotated + unrotated tensors
+        x_out = torch.cat([rot, x[..., self.axis_dim:]], dim=-1)
+        return x_out
+
+    def forward(
+        self,
+        x: Tensor,
+        H_patch: Optional[int] = None,
+        W_patch: Optional[int] = None,
+        T_patch: Optional[int] = None,
+    ) -> Tensor:
+        """Apply spatial or temporal RoPE.
+        
+        Args:
+            x (Tensor): Input query or key tensor.
+            H_patch (Optional[int]): Height of each patch.
+            W_patch (Optional[int]): Width of each patch.
+            T_patch (Optional[int]): Temporal length of each patch.
+
+        Returns:
+            Tensor: Output rotated spatial or temporal query or key tensor.
+        """
         with autocast(device_type=x.device.type):
-            pass
+            if (
+                T_patch is None and 
+                H_patch is not None and 
+                W_patch is not None
+            ):
+                return self._apply_rope_spatial(x, H_patch, W_patch)
+            elif (
+                H_patch is None and
+                W_patch is None and
+                T_patch is not None
+            ):
+                return self._apply_rope_temporal(x, T_patch)
+            else:
+                raise ValueError(
+                    "Pass H_patch, W_patch for spatial RoPE, T_patch for temporal RoPE."
+                )
 
 
 class SpatioTemporalAttention(nn.Module):
@@ -31,8 +167,6 @@ class SpatioTemporalAttention(nn.Module):
         use_qkv_bias (bool): Whether to use bias in QKV projections.
         use_o_bias (bool): Whether to use bias in O projection.
         use_qkv_proj (bool): Whether to use QKV projection.
-        max_temporal_len (int): Max input frames for RoPE.
-        max_spatial_len (int): Max height and width of frames for RoPE..
         device (torch.device): Accelerator at use.
         dtype (torch.dtype): Data type of tensors.
     """
@@ -46,8 +180,6 @@ class SpatioTemporalAttention(nn.Module):
         use_qkv_bias: bool,
         use_o_bias: bool,
         use_qkv_proj: bool,
-        max_temporal_len: int, # keep if RoPE uses
-        max_spatial_len: int,  # keep if RoPE uses
         device: torch.device,
         dtype: torch.dtype
     ):
@@ -104,11 +236,18 @@ class SpatioTemporalAttention(nn.Module):
         self.w_o = nn.Linear(d_model, d_model, bias=use_o_bias, device=device, dtype=dtype)
 
         # Set up RoPE
-        # TODO: add RoPE implementation and instantiate here
+        self.rope = RoPE3D(
+            head_dim=self.head_dim,
+            rope_theta=rope_theta,
+            device=device,
+            dtype=dtype
+        )
 
     def _setup_spatial_qkv(
         self,
         x: Tensor,
+        H_patch: int,
+        W_patch: int,
         use_qk_norm: bool = True,
         use_mqa: bool = False,
         qk_norm_eps: float = 1e-10,
@@ -118,6 +257,8 @@ class SpatioTemporalAttention(nn.Module):
         
         Args:
             x (Tensor): Input tensor of shape [B, T_frames, H*W, d_model].
+            H_patch (int): Height of each patch.
+            W_patch (int): Width of each patch.
             use_qk_norm (bool): Whether to use QK normalization.
             use_mqa (bool): Whether to use MQA or not.
             qk_norm_eps (float): Epsilon value for QK norm.
@@ -177,7 +318,8 @@ class SpatioTemporalAttention(nn.Module):
             k = apply_qk_norm(k, eps=qk_norm_eps, norm=qk_norm_type)
 
         # Apply RoPE
-        # TODO: Apply forward pass of RoPE to qk tensors
+        q = self.rope(q, H_patch, W_patch)
+        k = self.rope(k, H_patch, W_patch)
 
         # Extend KV heads
         k = extend_kv_heads(k, dim=2, repeats=self.heads_per_group, use_mqa=use_mqa)
@@ -194,6 +336,7 @@ class SpatioTemporalAttention(nn.Module):
     def _setup_temporal_qkv(
         self,
         x: Tensor,
+        T_patch: int,
         use_qk_norm: bool = True,
         use_mqa: bool = False,
         qk_norm_eps: float = 1e-10,
@@ -206,6 +349,7 @@ class SpatioTemporalAttention(nn.Module):
         
         Args:
             x (Tensor): Input tensor of shape of [B, T_frames, H*W, d_model].
+            T_patch (int): Temporal length of each patch.
             use_qk_norm (bool): Whether to use QK normalization or not.
             use_mqa (bool): Whether to use MQA or not.
             qk_norm_eps (float): QK norm epsilon value.
@@ -268,7 +412,8 @@ class SpatioTemporalAttention(nn.Module):
             k = apply_qk_norm(k, eps=qk_norm_eps, norm=qk_norm_type)
 
         # Apply RoPE
-        # TODO: apply RoPE forward pass here
+        q = self.rope(q, T_patch=T_patch)
+        k = self.rope(k, T_patch=T_patch)
 
         # Extend KV heads
         k = extend_kv_heads(k, dim=2, repeats=self.heads_per_group, use_mqa=use_mqa)
@@ -279,14 +424,8 @@ class SpatioTemporalAttention(nn.Module):
             # k_new, v_new: [B*H*W, num_heads, T_frames, head_dim]
             k_new = k.permute(0, 2, 1, 3)
             v_new = v.permute(0, 2, 1, 3)
-            
-            # Get all previously cached frames
             past_k, past_v = kv_cache.get_cached_kv(layer_idx)
-            
-            # Update cache with only the new KV
-            kv_cache.update(layer_idx, k_new, v_new)
-            
-            # Concatenate past with current for attention computation
+            kv_cache.update(layer_idx, k_new, v_new, num_spatial_patches)
             if past_k is not None and past_v is not None:
                 k_new = torch.cat([past_k, k_new], dim=2)
                 v_new = torch.cat([past_v, v_new], dim=2)
@@ -325,7 +464,7 @@ class SpatioTemporalAttention(nn.Module):
         B, T_frames, num_spatial_patches, _ = x.shape
 
         # Handle zero input tokens
-        if query.size(0) == 0 or key.size(0) == 0:
+        if query.numel() == 0 or key.numel() == 0:
             return torch.empty_like(x, device=x.device, dtype=x.dtype)
         
         # Handle padding mask
@@ -374,9 +513,11 @@ class SpatioTemporalAttention(nn.Module):
             Tensor: Output tensor of shape [B, T, H*W, d_model].
         """
         B, T_frames, num_spatial_patches, _ = x.shape
+        T_q = query.size(2)
+        T_k = key.size(2)
 
         # Handle zero input frames
-        if query.size(2) == 0 or key.size(2) == 0:
+        if query.numel() == 0 or key.numel() == 0:
             return torch.empty_like(x, device=x.device, dtype=x.dtype)
         
         # Handle padding mask
@@ -385,14 +526,23 @@ class SpatioTemporalAttention(nn.Module):
             padding_mask = padding_mask.bool().unsqueeze(1).expand(B, num_spatial_patches, T_frames)
             padding_mask = padding_mask.contiguous().reshape(-1, T_frames)
             query_padding_mask = padding_mask[:, None, :, None] # [B, 1, T_frames, 1]
-            key_padding_mask = padding_mask[:, None, None, :] # [B, 1, 1, T_frames]
+            if T_k > T_q:
+                past_padding_mask = torch.ones(
+                    B*num_spatial_patches, T_k - T_q,
+                    device=self.device,
+                    dtype=torch.bool
+                )
+                full_key_mask = torch.cat([past_padding_mask, padding_mask], dim=-1) # [B, T_k]
+                key_padding_mask = full_key_mask[:, None, None, :] # [B, 1, 1, T_k]
+            else:
+                key_padding_mask = padding_mask[:, None, None, :] # [B, 1, 1, T_frames]
             attn_mask = torch.logical_or(query_padding_mask, key_padding_mask)
             
             # Handle temporal causal masking
             if is_causal:
                 # causal_mask: [T_frames, T_frames], True = pad, False = compute attention
                 causal_mask = torch.triu(
-                    torch.ones(T_frames, T_frames, device=x.device, dtype=torch.bool),
+                    torch.ones(T_q, T_k, device=x.device, dtype=torch.bool),
                     diagonal=1
                 )
                 causal_mask = causal_mask[None, None, :, :] # [1, 1, T_frames, T_frames]
@@ -401,7 +551,7 @@ class SpatioTemporalAttention(nn.Module):
             # No padding, check for causal
             if is_causal:
                 causal_mask = torch.triu(
-                    torch.ones(T_frames, T_frames, device=x.device, dtype=torch.bool),
+                    torch.ones(T_q, T_k, device=x.device, dtype=torch.bool),
                     diagonal=1
                 )
                 # Only constraint is causal masking
@@ -424,6 +574,9 @@ class SpatioTemporalAttention(nn.Module):
     def forward(
         self, 
         x: Tensor,
+        H_patch: int,
+        W_patch: int,
+        T_patch: int,
         use_qk_norm: bool = True,
         use_mqa: bool = False,
         qk_norm_eps: float = 1e-10,
@@ -441,6 +594,9 @@ class SpatioTemporalAttention(nn.Module):
         
         Args:
             x (Tensor): Input tensor of shape [B, T_frames, H*W, d_model].
+            H_patch (int): Height of each patch.
+            W_patch (int): Width of each patch.
+            T_patch (int): Temporal length of each patch.
             use_qk_norm (bool): Whether to use QK normalization or not.
             use_mqa (bool): Whether to use MQA or not.
             qk_norm_eps (float): Epsilon value for QK norm.
@@ -453,12 +609,11 @@ class SpatioTemporalAttention(nn.Module):
             attention_interleave (Literal["st", "ts"]): Interleaving method.
                 st: Sequential application as TA(SA(x)).
                 ts: Sequential application as SA(TA(x)).
-        
-        Kwargs:
-            _return_debug (bool): Return QKV tensors for debugging.
+            _return_debug (bool): Whether to return QKV tensors for debugging.
+                Returns attention output, spatial QKV, temporal QKV.
 
         Returns:
-            Union[Tensor, Tuple[Tensor, ...]]:
+            Union:
                 Tensor: Attention output.
                 Tuple[Tensor, ...]: Attention output + QKV tensors.
         """
@@ -466,6 +621,7 @@ class SpatioTemporalAttention(nn.Module):
             # Get temporal QKV
             query_temporal, key_temporal, value_temporal = self._setup_temporal_qkv(
                 x,
+                T_patch,
                 use_qk_norm=use_qk_norm,
                 use_mqa=use_mqa,
                 qk_norm_eps=qk_norm_eps,
@@ -477,6 +633,8 @@ class SpatioTemporalAttention(nn.Module):
             # Get spatial QKV
             query_spatial, key_spatial, value_spatial = self._setup_spatial_qkv(
                 x,
+                H_patch,
+                W_patch,
                 use_qk_norm=use_qk_norm,
                 use_mqa=use_mqa,
                 qk_norm_eps=qk_norm_eps,
@@ -563,8 +721,6 @@ class SpatioTemporalAttentionBlock(nn.Module):
         use_qkv_bias: bool,
         use_o_bias: bool,
         use_qkv_proj: bool,
-        max_temporal_len: int,  # add to RoPE or remove.
-        max_spatial_len: int,   # add to RoPE or remove
         rms_norm_eps: float,
         dropout_prob: float,
         device: torch.device,
@@ -581,8 +737,6 @@ class SpatioTemporalAttentionBlock(nn.Module):
             use_qkv_bias=use_qkv_bias,
             use_o_bias=use_o_bias,
             use_qkv_proj=use_qkv_proj,
-            max_temporal_len=max_temporal_len,
-            max_spatial_len=max_spatial_len,
             device=device,
             dtype=dtype
         )
@@ -597,6 +751,9 @@ class SpatioTemporalAttentionBlock(nn.Module):
     def forward(
         self, 
         x: Tensor,
+        H_patch: int,
+        W_patch: int,
+        T_patch: int,
         use_qk_norm: bool = True,
         use_mqa: bool = False,
         qk_norm_eps: float = 1e-10,
@@ -608,10 +765,13 @@ class SpatioTemporalAttentionBlock(nn.Module):
         padding_mask: Optional[Tensor] = None,
         attention_interleave: Literal["st", "ts"] = "st"
     ) -> Tensor:
-        """Forward pass of ST transformer block.
+        """Forward pass of ST attention block.
         
         Args:
             x (Tensor): Input tensor of shape [B, T_frames, H*W, d_model].
+            H_patch (int): Height of each patch.
+            W_patch (int): Width of each patch.
+            T_patch (int): Temporal length of each patch.
             use_qk_norm (bool): Whether to use QK normalization or not.
             use_mqa (bool): Whether to use MQA or not.
             qk_norm_eps (float): Epsilon value for QK norm.
@@ -632,6 +792,9 @@ class SpatioTemporalAttentionBlock(nn.Module):
             return x + self.dropout(
                 self.st_attention(
                     self.rms_norm(x),
+                    H_patch=H_patch,
+                    W_patch=W_patch,
+                    T_patch=T_patch,
                     use_qk_norm=use_qk_norm,
                     use_mqa=use_mqa,
                     qk_norm_eps=qk_norm_eps,
@@ -646,11 +809,11 @@ class SpatioTemporalAttentionBlock(nn.Module):
             )
 
 def test_attention(use_pad:bool=True, return_debug:bool=False):
-    num_heads, d_model, query_groups, rope_theta = 4, 64, 2, 10000.0
+    num_heads, d_model, query_groups, rope_theta = 4, 96, 2, 10000.0
     softmax_scale = 1/(d_model//num_heads)**0.5
     attn = SpatioTemporalAttention(
         num_heads, d_model, query_groups, rope_theta,
-        softmax_scale, False, False, True, 1000, 1000,
+        softmax_scale, False, False, True,
         device="cpu", dtype=torch.float32
     )
     B, T_frames, H, W = 4, 6, 16, 16
@@ -662,10 +825,10 @@ def test_attention(use_pad:bool=True, return_debug:bool=False):
         )
     if return_debug:
         out, query_s, key_s, value_s, query_t, key_t, value_t = attn(
-            x, padding_mask=padding_mask, attention_interleave="st", _return_debug=True
+            x, H, W, T_frames, padding_mask=padding_mask, attention_interleave="st", _return_debug=True
         )
         return out, query_s, key_s, value_s, query_t, key_t, value_t
-    out = attn(x, padding_mask=padding_mask, attention_interleave="st")
+    out = attn(x, H, W, T_frames, padding_mask=padding_mask, attention_interleave="st")
     loss = out.sum()
     loss.backward()
     for name, param in attn.named_parameters():
@@ -673,12 +836,12 @@ def test_attention(use_pad:bool=True, return_debug:bool=False):
     return out
 
 def test_attention_block(use_pad:bool=True):
-    num_heads, d_model, query_groups, rope_theta = 4, 64, 2, 10000.0
+    num_heads, d_model, query_groups, rope_theta = 4, 96, 2, 10000.0
     softmax_scale = 1/(d_model//num_heads)**0.5
     dropout_prob, rms_norm_eps = 0.2, 1e-10
     attn = SpatioTemporalAttentionBlock(
         num_heads, d_model, query_groups, rope_theta,
-        softmax_scale, False, False, True, 1000, 1000,
+        softmax_scale, False, False, True,
         rms_norm_eps=rms_norm_eps, dropout_prob=dropout_prob,
         device="cpu", dtype=torch.float32
     )
@@ -689,9 +852,18 @@ def test_attention_block(use_pad:bool=True):
         padding_mask = torch.randint(
             0, 2, (B, T_frames), device="cpu", dtype=torch.bool
         )
-    out = attn(x, padding_mask=padding_mask, attention_interleave="st")
+    out = attn(
+        x, H, W, T_frames, 
+        use_cache=True, 
+        padding_mask=padding_mask, 
+        attention_interleave="st"
+    )
     loss = out.sum()
     loss.backward()
     for name, param in attn.named_parameters():
         print(f"{name}: {param.grad}")
     return out
+
+if __name__ == "__main__":
+    out = test_attention_block(True)
+    print(out.shape)

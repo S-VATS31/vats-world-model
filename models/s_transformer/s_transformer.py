@@ -111,7 +111,6 @@ class SpatialTransformer(nn.Module):
             Tensor: Output tensor of shape [B, H*W, codebook_size].
         """
         with autocast(device_type=x.device.type):
-            B, C_in, H, W = x.shape
             # Get x, patches, and mask from PE
             x, HW_patches, padding_mask = self.patch_embed(x)
             x = self.dropout(x)
