@@ -88,26 +88,26 @@ def x(model_args):
         device=model_args.device, dtype=model_args.dtype
     )
 
-def test_attn_no_mask(attn, patch_embed, x):
+def test_attn_no_cache(attn, patch_embed, x):
     pass
 
-def test_attn_block_no_mask(attn_block, patch_embed, x):
+def test_attn_block_no_cache(attn_block, patch_embed, x):
     pass
 
-def test_block_no_mask(block, patch_embed, x):
+def test_block_no_cache(block, patch_embed, x):
     pass
 
-def test_model_no_mask(model, patch_embed, x):
+def test_model_no_cache(model, patch_embed, x):
     pass
 
-def test_attn_mask(attn, patch_embed, x):
+def test_attn_cache(attn, patch_embed, x):
     pass
 
-def test_attn_block_mask(attn_block, patch_embed, x):
+def test_attn_block_cache(attn_block, patch_embed, x):
     pass
 
-def test_block_mask(block, patch_embed, x):
+def test_block_cache(block, patch_embed, x):
     pass
 
-def test_model_mask(model, patch_embed, x):
+def test_model_cache(model, patch_embed, x):
     pass

@@ -27,7 +27,7 @@ class PatchEmbed3D(nn.Module):
     ):
         super().__init__()
 
-        self.patch_size = patch_size # (pt, ph, pw)
+        self.patch_size = patch_size
         self.d_model = d_model
 
         self.proj = nn.Conv3d(
@@ -41,41 +41,53 @@ class PatchEmbed3D(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tuple[Tensor, Tuple[int, int, int], Tensor]:
-        """Forward pass.
+        """Forward pass with deterministic, checkpoint-safe padding.
 
         Args:
             x (Tensor): Input tensor of shape [B, C, T, H, W].
 
         Returns:
             Tuple:
-                - Tensor: [B, T, Hp*Wp, d_model] patch embeddings
+                - Tensor: [B, Tp, Hp*Wp, d_model] patch embeddings.
                 - Tuple: THW patches as (Tp, Hp, Wp).
                 - Tensor: Mask tensor of shape [B, Tp].
         """
+        B, _, T, H, W = x.shape
+        pt, ph, pw = self.patch_size
+
+        if T == 0:
+            return (
+                torch.empty(B, 0, 0, self.d_model, device=x.device, dtype=x.dtype),
+                (0, 0, 0),
+                torch.empty(B, 0, device=x.device, dtype=torch.bool)
+            )
+
+        # Compute number of patches
+        Tp = (T + pt - 1) // pt
+        Hp = (H + ph - 1) // ph
+        Wp = (W + pw - 1) // pw
+
+        # Compute padding
+        pad_t = Tp * pt - T
+        pad_h = Hp * ph - H
+        pad_w = Wp * pw - W
+
+        # frame mask: False = real frame, True = padded
+        frame_mask = torch.zeros((B, T), device=x.device, dtype=torch.bool)
+
+        # Pad input and frame mask
+        x = nn.functional.pad(x, (0, pad_w, 0, pad_h, 0, pad_t))
+        frame_mask = nn.functional.pad(frame_mask, (0, pad_t), value=True)
+
         with autocast(device_type=x.device.type):
-            B, _, T, H, W = x.shape
-            pt, ph, pw = self.patch_size
-
-            # frame mask: False = real frame, True = padded
-            frame_mask = torch.zeros((B, T), device=x.device, dtype=torch.bool)
-
-            pad_t = (pt - T % pt) % pt
-            pad_h = (ph - H % ph) % ph
-            pad_w = (pw - W % pw) % pw
-
-            if pad_t > 0 or pad_h > 0 or pad_w > 0:
-                x = nn.functional.pad(x, (0, pad_w, 0, pad_h, 0, pad_t))
-                frame_mask = nn.functional.pad(frame_mask, (0, pad_t), value=True)
-
             x = self.proj(x) # [B, d_model, Tp, Hp, Wp]
 
-            _, _, Tp, Hp, Wp = x.shape # get T, H, W, patches
+        # Convert frame mask [B, T+pad_t] to patch mask [B, Tp]
+        frames_padded = frame_mask[:, :(Tp * pt)].view(B, Tp, pt)
+        patch_mask = frames_padded.any(dim=-1)
 
-            # convert frame mask [B, T+pad_t] to patch mask [B, Tp]
-            frames_padded = frame_mask[:, :(Tp * pt)].view(B, Tp, pt)
-            patch_mask = frames_padded.any(dim=-1)
+        # Flatten to [B, Tp, Hp*Wp, d_model]
+        x = x.view(B, self.d_model, Tp, Hp * Wp).permute(0, 2, 3, 1).contiguous()
 
-            # flatten to [B, Tp, Hp*Wp, d_model]
-            x = x.view(B, self.d_model, Tp, -1).permute(0, 2, 3, 1).contiguous()
-
-            return x, (Tp, Hp, Wp), patch_mask
+        return x, (Tp, Hp, Wp), patch_mask
+    

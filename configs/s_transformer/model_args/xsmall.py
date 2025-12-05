@@ -6,7 +6,7 @@ from typing import Tuple
 @dataclass
 class ModelArgs:
     """Extra small configuration of model arguments."""
-    patch_size: Tuple[int, int] = (16, 16)
+    patch_size: Tuple[int, int] = (4, 4)
     C_in: int = 3
     max_patches: int = 512
     d_model: int = 256
@@ -18,7 +18,6 @@ class ModelArgs:
     rope_theta: float = 10000.0
     rms_norm_eps: float = 1e-7
     qk_norm_eps: float = 1e-8
-    vocab_size: int = 512
     max_batch_size: int = 2048
     gradient_checkpointing: bool = True
     use_qkv_bias: bool = False

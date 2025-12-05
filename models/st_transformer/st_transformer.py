@@ -129,14 +129,14 @@ class SpatioTemporalTransformer(nn.Module):
                         self.model_args.use_qk_norm,
                         self.model_args.use_mqa,
                         self.model_args.qk_norm_eps,
-                        self.model_args.qk_norm_eps,
+                        self.model_args.qk_norm_type,
                         self.model_args.is_causal,
                         use_cache,
                         self.kv_cache,
                         layer_idx,
                         padding_mask,
                         self.model_args.attention_interleave,
-                        use_reentrant=False
+                        use_reentrant=True,
                     )
                 else:
                     x  = layer(
@@ -165,11 +165,18 @@ class SpatioTemporalTransformer(nn.Module):
             return logits
 
 def test_model(use_cache:bool=False):
+    torch.set_anomaly_enabled(True)
     model_args = ModelArgs()
-    model = SpatioTemporalTransformer(model_args)
-    B, C, T, H, W = 40, 3, 65, 39, 37
+    model = SpatioTemporalTransformer(model_args).float()
+    B, C, T, H, W = 10, 3, 15, 12, 20
     x = torch.randn(B, C, T, H, W, device="cpu", dtype=torch.float32)
     out = model(x, use_cache)
+    loss = out.sum()
+    loss.backward()
+    for name, param in model.named_parameters():
+        print(f"{name}: {param.grad}")
+    params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"#params: {params}")
     return out
 
 if __name__ == "__main__":

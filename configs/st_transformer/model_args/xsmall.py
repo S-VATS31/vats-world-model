@@ -6,7 +6,7 @@ from typing import Tuple, Literal
 @dataclass
 class ModelArgs:
     """Extra small configuration of model arguments."""
-    patch_size: Tuple[int, int] = (2, 16, 16)
+    patch_size: Tuple[int, int] = (2, 8, 8)
     C_in: int = 3
     max_frames: int = 512
     d_model: int = 96
