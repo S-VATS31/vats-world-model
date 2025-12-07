@@ -492,7 +492,7 @@ def test_cache():
             is_causal=True
         )
         past_k, past_v = cache.get(layer_idx)
-        if past_k is not None:
+        if past_k is not None and past_v is not None:
             assert past_k.shape == (B, num_heads, t+1, d_model//num_heads)
             assert past_v.shape == (B, num_heads, t+1, d_model//num_heads)
         assert out.shape[0] == B
