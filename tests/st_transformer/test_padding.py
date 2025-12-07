@@ -30,7 +30,7 @@ def attn(model_args):
     return SpatioTemporalAttention(
         num_heads=model_args.num_heads,
         d_model=model_args.d_model,
-        query_groups=model_args.query_gorups,
+        query_groups=model_args.query_groups,
         rope_theta=model_args.rope_theta,
         softmax_scale=model_args.softmax_scale,
         use_qkv_bias=model_args.use_qkv_bias,
@@ -45,7 +45,7 @@ def attn_block(model_args):
     return SpatioTemporalAttentionBlock(
         num_heads=model_args.num_heads,
         d_model=model_args.d_model,
-        query_groups=model_args.query_gorups,
+        query_groups=model_args.query_groups,
         rope_theta=model_args.rope_theta,
         softmax_scale=model_args.softmax_scale,
         use_qkv_bias=model_args.use_qkv_bias,
@@ -62,7 +62,7 @@ def block(model_args):
     return SpatioTemporalTransformerBlock(
         num_heads=model_args.num_heads,
         d_model=model_args.d_model,
-        query_groups=model_args.query_gorups,
+        query_groups=model_args.query_groups,
         rope_theta=model_args.rope_theta,
         softmax_scale=model_args.softmax_scale,
         use_qkv_bias=model_args.use_qkv_bias,

@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.amp import autocast
 
 class RoPE(nn.Module):
     """RoPE module for text encoder.
@@ -45,18 +44,17 @@ class RoPE(nn.Module):
         Returns:
             Tensor with RoPE applied, same shape as input.
         """
-        with autocast(device_type=x.device.type):
-            T = x.size(1)
+        T = x.size(1)
 
-            pos = torch.arange(T, device=x.device, dtype=x.dtype)
-            freqs = torch.einsum("i,j->ij", pos, self.inv_freq)
-            embedding = torch.cat([freqs, freqs], dim=-1) # [T, head_dim]
+        pos = torch.arange(T, device=x.device, dtype=x.dtype)
+        freqs = torch.einsum("i,j->ij", pos, self.inv_freq)
+        embedding = torch.cat([freqs, freqs], dim=-1) # [T, head_dim]
 
-            cos_embed = embedding.cos()[None, :, None, :]
-            sin_embed = embedding.sin()[None, :, None, :]
+        cos_embed = embedding.cos()[None, :, None, :]
+        sin_embed = embedding.sin()[None, :, None, :]
 
-            x_even, x_odd = x[..., ::2], x[..., 1::2] # 2i for even, 2i+1 for odd
-            rotated = torch.stack((-x_odd, x_even), dim=-1).reshape_as(x)
+        x_even, x_odd = x[..., ::2], x[..., 1::2] # 2i for even, 2i+1 for odd
+        rotated = torch.stack((-x_odd, x_even), dim=-1).reshape_as(x)
 
-            return x * cos_embed + rotated * sin_embed # [B, T, num_heads, head_dim]
+        return x * cos_embed + rotated * sin_embed # [B, T, num_heads, head_dim]
         
