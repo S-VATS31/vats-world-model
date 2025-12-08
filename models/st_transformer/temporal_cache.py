@@ -3,7 +3,8 @@ from typing import Tuple, Optional
 import torch
 from torch import Tensor
 
-# TODO: add logging if frames get truncated
+from utils.logger import setup_logger
+logger = setup_logger(name="cache_logger", log_file="inference.log")
 
 class TemporalKVCache:
     """KV cache for temporal attention.
@@ -102,12 +103,14 @@ class TemporalKVCache:
         if self.current_frames + new_frames > self.max_frames:
             current_space = self.max_frames - self.current_frames
             if current_space <= 0:
+                logger.info("Cache space full")
                 return
             
             # Truncate to create space
             k = k[:, :, :current_space]
             v = v[:, :, :current_space]
             new_frames = current_space
+            logger.info(f"Truncated {self.max_frames - current_space} frames")
         
         # Update cache with new tensors
         self.cache[layer_idx]["k"][:, :, self.current_frames:self.current_frames+new_frames] = k

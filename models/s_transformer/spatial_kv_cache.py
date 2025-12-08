@@ -3,6 +3,9 @@ from typing import Tuple, Optional
 import torch
 from torch import Tensor
 
+from utils.logger import setup_logger
+logger = setup_logger(name="cache_logger", log_file="inference.log")
+
 class SpatialKVCache:
     def __init__(
         self,
@@ -78,12 +81,14 @@ class SpatialKVCache:
         if self.current_patches + new_patches > self.max_patches:
             current_space = self.max_patches - self.current_patches
             if self.current_patches <= 0:
+                logger.info("Cache space full.")
                 return
             
             # Truncate to current_space if there is space
             k = k[:, :, :current_space]
             v = v[:, :, :current_space]
             new_patches = current_space
+            logger.info(f"Truncated {self.max_patches-current_space} patches.")
 
         # Update cache with new patches
         self.cache[layer_idx]["k"][:, :, self.current_patches:self.current_patches+new_patches] = k

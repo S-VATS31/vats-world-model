@@ -60,7 +60,7 @@ class PatchEmbed(nn.Module):
             pad_h = (ph - H % ph) % ph
             pad_w = (pw - W % pw) % pw
 
-            # SDPA-compatible mask: 0 = compute attention, 1 = padded
+            # Handle masking where 0 = compute attention, 1 = padded
             mask = torch.zeros((B, H, W), device=x.device, dtype=torch.bool)
             if pad_h > 0 or pad_w > 0:
                 x = nn.functional.pad(x, (0, pad_w, 0, pad_h))

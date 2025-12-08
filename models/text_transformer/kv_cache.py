@@ -3,6 +3,9 @@ from typing import Optional, Tuple
 import torch
 from torch import Tensor
 
+from utils.logger import setup_logger
+logger = setup_logger(name="cache_logger", log_file="inference.log")
+
 class KVCache:
     """KV caching module.
     
@@ -81,12 +84,14 @@ class KVCache:
         if self.current_seq_len + new_seq_len > self.max_seq_len:
             current_space = self.max_seq_len - self.current_seq_len
             if current_space <= 0:
+                logger.info("Cache space full")
                 return
             
             # Truncate to current_space
             k = k[:, :, :current_space]
             v = v[:, :, :current_space]
             new_seq_len = current_space
+            logger.info(f"Truncated {self.max_seq_len - current_space} tokens")
 
         # Update sequence length dimension with new tokens
         self.cache[layer_idx]["k"][:, :, self.current_seq_len:self.current_seq_len+new_seq_len] = k

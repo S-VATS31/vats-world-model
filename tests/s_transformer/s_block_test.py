@@ -14,7 +14,7 @@ def block():
         d_model=D,
         num_heads=ModelArgs().num_heads,
         query_groups=ModelArgs().query_groups,
-        rospe_theta=ModelArgs().rope_theta,
+        rope_theta=ModelArgs().rope_theta,
         softmax_scale=ModelArgs().softmax_scale,
         use_qkv_bias=ModelArgs().use_qkv_bias,
         use_o_bias=ModelArgs().use_o_bias,

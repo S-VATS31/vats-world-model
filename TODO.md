@@ -3,7 +3,7 @@
 - [ ] Implement VQVAE for spatio-temporal transformer
 
 ## All Modules
-- [ ] Fix autocast placement for all modules
+- [x] Fix autocast placement for all modules
 - [ ] Research accelerated attention for all modules (Flash Attn. 3)
 - [ ] Research accelerated MLP variant
 
@@ -60,8 +60,8 @@
 - [ ] Compare to previous models
 
 ## Utilities
-- [ ] Add logger setup
-- [ ] Add generation utilities
+- [x] Add logger setup
+- [x] Add generation utilities
 
 ## Research
 - [ ] Research VQVAE for spatial transformer
